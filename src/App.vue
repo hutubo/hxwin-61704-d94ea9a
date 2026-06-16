@@ -1,5 +1,45 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, reactive, ref } from "vue";
+
+interface ReagentRecord {
+  name: string;
+  casNo: string;
+  batchNo: string;
+  storageTemp: string;
+  hazardClass: string;
+  remaining: string;
+  receiveDate: string;
+  originalExpiry: string;
+  openDate?: string;
+  validDaysAfterOpen?: number;
+}
+
+interface FormState {
+  name: string;
+  casNo: string;
+  batchNo: string;
+  storageTemp: string;
+  hazardClass: string;
+  receiveDate: string;
+  originalExpiry: string;
+  openDate: string;
+  validDaysAfterOpen: string;
+  remaining: string;
+}
+
+interface FormErrors {
+  name?: string;
+  casNo?: string;
+  batchNo?: string;
+  storageTemp?: string;
+  hazardClass?: string;
+  receiveDate?: string;
+  originalExpiry?: string;
+  openDate?: string;
+  validDaysAfterOpen?: string;
+  remaining?: string;
+  general?: string;
+}
 
 const project = {
   "id": "hxwin-61704",
@@ -96,13 +136,156 @@ const project = {
     "剩余量"
   ]
 } as const;
+
+const reagentList = ref<ReagentRecord[]>([
+  { name: "乙腈", casNo: "75-05-8", batchNo: "ACN2405", storageTemp: "2-8°C", hazardClass: "易燃", remaining: "1.2L", receiveDate: "2024-05-10", originalExpiry: "2026-05-10" },
+  { name: "胰蛋白酶", casNo: "9002-07-7", batchNo: "TRY2403", storageTemp: "-20°C", hazardClass: "生物试剂", remaining: "8支", receiveDate: "2024-03-15", originalExpiry: "2025-03-15" },
+  { name: "盐酸", casNo: "7647-01-0", batchNo: "HCL2401", storageTemp: "常温", hazardClass: "腐蚀性", remaining: "500mL", receiveDate: "2024-01-20", originalExpiry: "2026-01-20" }
+]);
+
 const filter = ref<string>(project.filters[0]);
 const selected = ref(0);
+
 const visibleRecords = computed(() => {
-  if (filter.value === project.filters[0]) return project.records;
-  return project.records.filter((row) => row.join(" ").includes(filter.value));
+  const baseRecords = reagentList.value.map(r => [r.name, r.casNo, r.batchNo, r.storageTemp, r.hazardClass, r.remaining] as string[]);
+  if (filter.value === project.filters[0]) return baseRecords;
+  return baseRecords.filter((row) => row.join(" ").includes(filter.value));
 });
-const rows = computed(() => visibleRecords.value.length ? visibleRecords.value : project.records);
+const rows = computed(() => visibleRecords.value.length ? visibleRecords.value : reagentList.value.map(r => [r.name, r.casNo, r.batchNo, r.storageTemp, r.hazardClass, r.remaining] as string[]));
+
+const batchForm = reactive<FormState>({
+  name: "",
+  casNo: "",
+  batchNo: "",
+  storageTemp: "",
+  hazardClass: "",
+  receiveDate: "",
+  originalExpiry: "",
+  openDate: "",
+  validDaysAfterOpen: "",
+  remaining: ""
+});
+
+const formErrors = reactive<FormErrors>({});
+const showBatchForm = ref(true);
+
+const hazardOptions = ["易燃", "腐蚀性", "毒性", "氧化性", "生物试剂", "易制毒", "易制爆", "普通"];
+const tempOptions = ["常温", "2-8°C", "-20°C", "-80°C", "0-4°C", "15-25°C"];
+
+const validateRemaining = (value: string): boolean => {
+  return /^\d+(\.\d+)?\s*[a-zA-Z\u4e00-\u9fa5]+$/.test(value.trim());
+};
+
+const validateForm = (): boolean => {
+  Object.keys(formErrors).forEach(key => delete formErrors[key as keyof FormErrors]);
+  let isValid = true;
+
+  if (!batchForm.name.trim()) {
+    formErrors.name = "试剂名称为必填项";
+    isValid = false;
+  }
+  if (!batchForm.casNo.trim()) {
+    formErrors.casNo = "CAS号为必填项";
+    isValid = false;
+  }
+  if (!batchForm.batchNo.trim()) {
+    formErrors.batchNo = "批号为必填项";
+    isValid = false;
+  }
+  if (!batchForm.storageTemp.trim()) {
+    formErrors.storageTemp = "储存温度为必填项";
+    isValid = false;
+  }
+  if (!batchForm.hazardClass.trim()) {
+    formErrors.hazardClass = "危险分类为必填项";
+    isValid = false;
+  }
+  if (!batchForm.receiveDate) {
+    formErrors.receiveDate = "入库日期为必填项";
+    isValid = false;
+  }
+  if (!batchForm.originalExpiry) {
+    formErrors.originalExpiry = "原始有效期为必填项";
+    isValid = false;
+  }
+  if (!batchForm.remaining.trim()) {
+    formErrors.remaining = "剩余量为必填项";
+    isValid = false;
+  } else if (!validateRemaining(batchForm.remaining)) {
+    formErrors.remaining = "剩余量格式不正确，例如：500mL、1.2L、10支";
+    isValid = false;
+  }
+
+  if (batchForm.receiveDate && batchForm.originalExpiry) {
+    const receiveDate = new Date(batchForm.receiveDate);
+    const expiryDate = new Date(batchForm.originalExpiry);
+    if (expiryDate <= receiveDate) {
+      formErrors.originalExpiry = "原始有效期必须晚于入库日期";
+      isValid = false;
+    }
+  }
+
+  if (batchForm.openDate) {
+    const openDate = new Date(batchForm.openDate);
+    const receiveDate = new Date(batchForm.receiveDate);
+    const expiryDate = new Date(batchForm.originalExpiry);
+    
+    if (batchForm.receiveDate && openDate < receiveDate) {
+      formErrors.openDate = "开封日期不能早于入库日期";
+      isValid = false;
+    }
+    if (batchForm.originalExpiry && openDate > expiryDate) {
+      formErrors.openDate = "开封日期不能晚于原始有效期";
+      isValid = false;
+    }
+    if (!batchForm.validDaysAfterOpen) {
+      formErrors.validDaysAfterOpen = "已填写开封日期时，开封后有效天数为必填项";
+      isValid = false;
+    } else if (Number(batchForm.validDaysAfterOpen) <= 0 || !Number.isInteger(Number(batchForm.validDaysAfterOpen))) {
+      formErrors.validDaysAfterOpen = "请输入有效的正整数天数";
+      isValid = false;
+    }
+  }
+
+  return isValid;
+};
+
+const handleBatchSubmit = () => {
+  if (!validateForm()) return;
+
+  const newRecord: ReagentRecord = {
+    name: batchForm.name.trim(),
+    casNo: batchForm.casNo.trim(),
+    batchNo: batchForm.batchNo.trim(),
+    storageTemp: batchForm.storageTemp.trim(),
+    hazardClass: batchForm.hazardClass.trim(),
+    remaining: batchForm.remaining.trim(),
+    receiveDate: batchForm.receiveDate,
+    originalExpiry: batchForm.originalExpiry
+  };
+
+  if (batchForm.openDate) {
+    newRecord.openDate = batchForm.openDate;
+    newRecord.validDaysAfterOpen = parseInt(batchForm.validDaysAfterOpen, 10);
+  }
+
+  reagentList.value.unshift(newRecord);
+  resetBatchForm();
+};
+
+const resetBatchForm = () => {
+  batchForm.name = "";
+  batchForm.casNo = "";
+  batchForm.batchNo = "";
+  batchForm.storageTemp = "";
+  batchForm.hazardClass = "";
+  batchForm.receiveDate = "";
+  batchForm.originalExpiry = "";
+  batchForm.openDate = "";
+  batchForm.validDaysAfterOpen = "";
+  batchForm.remaining = "";
+  Object.keys(formErrors).forEach(key => delete formErrors[key as keyof FormErrors]);
+};
 </script>
 
 <template>
@@ -166,6 +349,79 @@ const rows = computed(() => visibleRecords.value.length ? visibleRecords.value :
             <div class="detail-item" v-for="item in project.details" :key="item[0]">
               <strong>{{ item[0] }}</strong>
               <p>{{ item[1] }}</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel batch-panel">
+          <h2>
+            <span class="batch-title">试剂批次新增</span>
+            <span class="collapse-btn" @click="showBatchForm = !showBatchForm">
+              {{ showBatchForm ? '收起' : '展开' }}
+            </span>
+          </h2>
+          <div v-show="showBatchForm" class="batch-form">
+            <div class="form-grid form-grid-dense">
+              <label :class="{ 'has-error': formErrors.name }">
+                试剂名称 <span class="required">*</span>
+                <input v-model="batchForm.name" placeholder="如：乙腈" />
+                <span v-if="formErrors.name" class="error-text">{{ formErrors.name }}</span>
+              </label>
+              <label :class="{ 'has-error': formErrors.casNo }">
+                CAS号 <span class="required">*</span>
+                <input v-model="batchForm.casNo" placeholder="如：75-05-8" />
+                <span v-if="formErrors.casNo" class="error-text">{{ formErrors.casNo }}</span>
+              </label>
+              <label :class="{ 'has-error': formErrors.batchNo }">
+                批号 <span class="required">*</span>
+                <input v-model="batchForm.batchNo" placeholder="如：ACN2405" />
+                <span v-if="formErrors.batchNo" class="error-text">{{ formErrors.batchNo }}</span>
+              </label>
+              <label :class="{ 'has-error': formErrors.storageTemp }">
+                储存温度 <span class="required">*</span>
+                <select v-model="batchForm.storageTemp">
+                  <option value="">请选择</option>
+                  <option v-for="opt in tempOptions" :key="opt" :value="opt">{{ opt }}</option>
+                </select>
+                <span v-if="formErrors.storageTemp" class="error-text">{{ formErrors.storageTemp }}</span>
+              </label>
+              <label :class="{ 'has-error': formErrors.hazardClass }">
+                危险分类 <span class="required">*</span>
+                <select v-model="batchForm.hazardClass">
+                  <option value="">请选择</option>
+                  <option v-for="opt in hazardOptions" :key="opt" :value="opt">{{ opt }}</option>
+                </select>
+                <span v-if="formErrors.hazardClass" class="error-text">{{ formErrors.hazardClass }}</span>
+              </label>
+              <label :class="{ 'has-error': formErrors.remaining }">
+                剩余量 <span class="required">*</span>
+                <input v-model="batchForm.remaining" placeholder="如：500mL、10支" />
+                <span v-if="formErrors.remaining" class="error-text">{{ formErrors.remaining }}</span>
+              </label>
+              <label :class="{ 'has-error': formErrors.receiveDate }">
+                入库日期 <span class="required">*</span>
+                <input type="date" v-model="batchForm.receiveDate" />
+                <span v-if="formErrors.receiveDate" class="error-text">{{ formErrors.receiveDate }}</span>
+              </label>
+              <label :class="{ 'has-error': formErrors.originalExpiry }">
+                原始有效期 <span class="required">*</span>
+                <input type="date" v-model="batchForm.originalExpiry" />
+                <span v-if="formErrors.originalExpiry" class="error-text">{{ formErrors.originalExpiry }}</span>
+              </label>
+              <label :class="{ 'has-error': formErrors.openDate }">
+                开封日期
+                <input type="date" v-model="batchForm.openDate" />
+                <span v-if="formErrors.openDate" class="error-text">{{ formErrors.openDate }}</span>
+              </label>
+              <label :class="{ 'has-error': formErrors.validDaysAfterOpen }">
+                开封后有效天数
+                <input v-model="batchForm.validDaysAfterOpen" type="number" min="1" placeholder="如：30" />
+                <span v-if="formErrors.validDaysAfterOpen" class="error-text">{{ formErrors.validDaysAfterOpen }}</span>
+              </label>
+            </div>
+            <div class="actions">
+              <button class="primary" @click="handleBatchSubmit">提交批次</button>
+              <button class="secondary" @click="resetBatchForm">重置</button>
             </div>
           </div>
         </section>
